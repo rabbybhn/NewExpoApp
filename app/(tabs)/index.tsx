@@ -5,31 +5,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import { useCallback, useRef, useState, type ComponentProps } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CreditPill } from '@/components/CreditPill';
-import { GradientButton } from '@/components/GradientButton';
-import { colors, font, gradients, radius, spacing } from '@/constants/theme';
+import { Button } from '@/components/Button';
+import { ScanTag } from '@/components/ScanTag';
+import { colors, fonts, spacing, type } from '@/constants/theme';
 import { useCredits } from '@/context/CreditsContext';
+import type { PressState } from '@/utils/pressable';
 
 const FLASH_CYCLE: FlashMode[] = ['off', 'on', 'auto'];
-const FLASH_ICON: Record<string, ComponentProps<typeof Feather>['name']> = {
-  off: 'zap-off',
-  on: 'zap',
-  auto: 'zap',
-};
+const FLASH_LABEL: Record<string, string> = { off: 'Flash off', on: 'Flash on', auto: 'Flash auto' };
 
-export default function ScannerScreen() {
+export default function IdentifyScreen() {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
   const camera = useRef<CameraView>(null);
@@ -40,9 +28,7 @@ export default function ScannerScreen() {
   const { credits, showPaywall } = useCredits();
 
   // The camera unmounts when the tab loses focus; wait for it to report ready again.
-  useFocusEffect(
-    useCallback(() => () => setCameraReady(false), []),
-  );
+  useFocusEffect(useCallback(() => () => setCameraReady(false), []));
 
   const ensureCredits = () => {
     if (credits === null) return false;
@@ -53,12 +39,7 @@ export default function ScannerScreen() {
     return true;
   };
 
-  const openResult = (uri: string, width?: number, height?: number) => {
-    router.push({
-      pathname: '/result',
-      params: { uri, width: width ? String(width) : '', height: height ? String(height) : '' },
-    });
-  };
+  const openResult = (uri: string) => router.push({ pathname: '/result', params: { uri } });
 
   const capture = async () => {
     if (busy || !cameraReady || !ensureCredits()) return;
@@ -67,9 +48,9 @@ export default function ScannerScreen() {
       if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       const photo = await camera.current?.takePictureAsync({ quality: 0.85 });
       if (!photo?.uri) throw new Error('No photo returned');
-      openResult(photo.uri, photo.width, photo.height);
+      openResult(photo.uri);
     } catch {
-      Alert.alert('Capture failed', 'We couldn’t take that photo. Please try again.');
+      Alert.alert('Photo not taken', 'The camera didn’t return a photo. Try again, or choose one from your library.');
     } finally {
       setBusy(false);
     }
@@ -79,30 +60,22 @@ export default function ScannerScreen() {
     if (busy || !ensureCredits()) return;
     setBusy(true);
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        quality: 1,
-      });
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 1 });
       const asset = result.canceled ? undefined : result.assets[0];
-      if (asset) openResult(asset.uri, asset.width, asset.height);
+      if (asset) openResult(asset.uri);
     } catch {
-      Alert.alert('Photo library unavailable', 'We couldn’t open your photo library. Check app permissions.');
+      Alert.alert('Library unavailable', 'PlantID can’t open your photos. Allow photo access in Settings.');
     } finally {
       setBusy(false);
     }
   };
 
-  const cycleFlash = () => {
-    setFlash((f) => FLASH_CYCLE[(FLASH_CYCLE.indexOf(f) + 1) % FLASH_CYCLE.length]);
-  };
-
-  // --- Permission states -------------------------------------------------------------------
+  const cycleFlash = () => setFlash((f) => FLASH_CYCLE[(FLASH_CYCLE.indexOf(f) + 1) % FLASH_CYCLE.length]);
 
   if (!permission) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={colors.leaf} />
+        <ActivityIndicator color={colors.paper} />
       </View>
     );
   }
@@ -111,29 +84,28 @@ export default function ScannerScreen() {
     const blocked = !permission.canAskAgain;
     return (
       <View style={[styles.center, styles.permission, { paddingTop: insets.top }]}>
-        <LinearGradient colors={gradients.leaf} style={styles.permissionIcon}>
-          <Feather name="camera" size={34} color={colors.background} />
-        </LinearGradient>
-        <Text style={styles.permissionTitle}>Let’s meet your plants</Text>
+        <Text style={styles.permissionTitle}>Point your camera at a plant</Text>
         <Text style={styles.permissionBody}>
-          PlantID needs camera access to photograph leaves, flowers and trees.
-          {blocked ? ' Camera access is turned off — enable it in Settings to continue.' : ''}
+          {blocked
+            ? 'Camera access is off for PlantID. Turn it on in Settings, or choose a photo from your library.'
+            : 'PlantID needs the camera to photograph leaves and flowers. A photo is only sent for analysis when you tap Identify.'}
         </Text>
-        <GradientButton
+        <Button
           label={blocked ? 'Open Settings' : 'Allow camera'}
           icon={blocked ? 'settings' : 'camera'}
           onPress={blocked ? () => Linking.openSettings() : requestPermission}
           style={styles.permissionButton}
         />
-        <Pressable onPress={pickFromLibrary} style={styles.linkButton} hitSlop={8}>
-          <Feather name="image" size={16} color={colors.textSecondary} />
-          <Text style={styles.linkText}>Choose from library instead</Text>
-        </Pressable>
+        <Button
+          label="Choose from library"
+          icon="image"
+          variant="outline"
+          onPress={pickFromLibrary}
+          style={styles.permissionButton}
+        />
       </View>
     );
   }
-
-  // --- Camera ------------------------------------------------------------------------------
 
   return (
     <View style={styles.container}>
@@ -145,19 +117,19 @@ export default function ScannerScreen() {
           flash={flash}
           onCameraReady={() => setCameraReady(true)}
           onMountError={() =>
-            Alert.alert('Camera unavailable', 'The camera could not start. You can still pick a photo from your library.')
+            Alert.alert('Camera unavailable', 'The camera didn’t start. Choose a photo from your library instead.')
           }
         />
       ) : (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.prussian }]} />
       )}
 
-      <LinearGradient colors={gradients.fadeTop} style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
-        <View style={styles.brand}>
-          <Feather name="feather" size={20} color={colors.leaf} />
-          <Text style={styles.brandText}>PlantID</Text>
-        </View>
-        <CreditPill onPress={() => router.push('/store')} />
+      <LinearGradient
+        colors={['rgba(15, 39, 66, 0.85)', 'transparent']}
+        style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}
+      >
+        <Text style={styles.brand}>PlantID</Text>
+        <ScanTag onPress={() => router.push('/store')} />
       </LinearGradient>
 
       <View style={styles.frameWrap} pointerEvents="none">
@@ -167,43 +139,45 @@ export default function ScannerScreen() {
           <View style={[styles.corner, styles.bl]} />
           <View style={[styles.corner, styles.br]} />
         </View>
-        <Text style={styles.hint}>Center a leaf, flower or whole plant in the frame</Text>
+        <Text style={styles.hint}>Fill the frame with one leaf or flower</Text>
       </View>
 
-      <LinearGradient colors={gradients.fadeBottom} style={[styles.bottomBar, { paddingBottom: spacing.xl }]}>
-        <RoundButton icon="image" label="Library" onPress={pickFromLibrary} disabled={busy} />
+      <LinearGradient colors={['transparent', 'rgba(15, 39, 66, 0.92)']} style={styles.bottomBar}>
+        <SideButton icon="image" label="Library" onPress={pickFromLibrary} disabled={busy} />
 
-        <Pressable
-          onPress={capture}
-          disabled={busy || !cameraReady}
-          accessibilityRole="button"
-          accessibilityLabel="Scan plant"
-          style={({ pressed }) => [styles.shutterOuter, pressed && { transform: [{ scale: 0.94 }] }]}
-        >
-          <LinearGradient colors={gradients.leaf} style={styles.shutterInner}>
+        <View style={styles.shutterColumn}>
+          <Pressable
+            onPress={capture}
+            disabled={busy || !cameraReady}
+            accessibilityRole="button"
+            accessibilityLabel="Identify plant"
+            style={({ pressed, focused }: PressState) => [
+              styles.shutter,
+              pressed && { transform: [{ scale: 0.95 }] },
+              focused && styles.focused,
+            ]}
+          >
             {busy ? (
-              <ActivityIndicator color={colors.background} />
+              <ActivityIndicator color={colors.ink} />
             ) : (
-              <Feather name="aperture" size={30} color={colors.background} />
+              <Feather name="aperture" size={30} color={colors.ink} />
             )}
-          </LinearGradient>
-        </Pressable>
+          </Pressable>
+          <Text style={styles.shutterLabel}>Identify</Text>
+        </View>
 
-        <RoundButton
-          icon={FLASH_ICON[flash]}
-          label={flash === 'auto' ? 'Auto' : flash === 'on' ? 'On' : 'Off'}
+        <SideButton
+          icon={flash === 'off' ? 'zap-off' : 'zap'}
+          label={FLASH_LABEL[flash]}
           onPress={cycleFlash}
           active={flash !== 'off'}
         />
       </LinearGradient>
-      <Text style={styles.shutterLabel} pointerEvents="none">
-        Scan Plant
-      </Text>
     </View>
   );
 }
 
-function RoundButton({
+function SideButton({
   icon,
   label,
   onPress,
@@ -222,37 +196,27 @@ function RoundButton({
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.roundWrap, { opacity: disabled ? 0.5 : pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [styles.side, { opacity: disabled ? 0.5 : pressed ? 0.7 : 1 }]}
     >
-      <View style={[styles.round, active && styles.roundActive]}>
-        <Feather name={icon} size={22} color={active ? colors.sun : colors.text} />
+      <View style={[styles.sideCircle, active && styles.sideActive]}>
+        <Feather name={icon} size={20} color={active ? colors.ink : colors.paper} />
       </View>
-      <Text style={styles.roundLabel}>{label}</Text>
+      <Text style={styles.sideLabel}>{label}</Text>
     </Pressable>
   );
 }
 
-const FRAME = 260;
-const CORNER = 34;
+const FRAME = 264;
+const CORNER = 28;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.prussian },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.prussian },
 
-  permission: { paddingHorizontal: spacing.xxl },
-  permissionIcon: {
-    width: 84,
-    height: 84,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.xl,
-  },
-  permissionTitle: { ...font.title, color: colors.text, textAlign: 'center' },
-  permissionBody: { ...font.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
-  permissionButton: { marginTop: spacing.xl, alignSelf: 'stretch' },
-  linkButton: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.lg },
-  linkText: { ...font.label, color: colors.textSecondary },
+  permission: { paddingHorizontal: spacing.xl, alignItems: 'stretch' },
+  permissionTitle: { ...type.title, fontSize: 32, lineHeight: 38, color: colors.paper },
+  permissionBody: { ...type.body, color: colors.wash, marginTop: spacing.md, marginBottom: spacing.xl },
+  permissionButton: { marginTop: spacing.sm },
 
   topBar: {
     position: 'absolute',
@@ -265,25 +229,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
   },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  brandText: { ...font.heading, fontSize: 20, color: colors.text },
+  brand: { fontFamily: fonts.displayItalic, fontSize: 26, color: colors.paper },
 
   frameWrap: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
-  frame: { width: FRAME, height: FRAME },
-  corner: { position: 'absolute', width: CORNER, height: CORNER, borderColor: colors.leaf },
-  tl: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: radius.lg },
-  tr: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: radius.lg },
-  bl: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: radius.lg },
-  br: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: radius.lg },
+  frame: { width: FRAME, height: FRAME * 1.2 },
+  corner: { position: 'absolute', width: CORNER, height: CORNER, borderColor: colors.paper },
+  tl: { top: 0, left: 0, borderTopWidth: 2, borderLeftWidth: 2 },
+  tr: { top: 0, right: 0, borderTopWidth: 2, borderRightWidth: 2 },
+  bl: { bottom: 0, left: 0, borderBottomWidth: 2, borderLeftWidth: 2 },
+  br: { bottom: 0, right: 0, borderBottomWidth: 2, borderRightWidth: 2 },
   hint: {
-    ...font.label,
-    color: colors.text,
+    ...type.mono,
+    fontSize: 13,
+    color: colors.paper,
     marginTop: spacing.lg,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.overlay,
-    overflow: 'hidden',
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.scrim,
   },
 
   bottomBar: {
@@ -292,38 +254,35 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-around',
-    paddingTop: spacing.xxl + spacing.lg,
+    paddingTop: spacing.xxl * 2,
+    paddingBottom: spacing.xl,
   },
-  shutterOuter: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.85)',
-    padding: 4,
-    marginBottom: spacing.xl,
+  shutterColumn: { alignItems: 'center', gap: spacing.sm },
+  shutter: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.paper,
+    borderWidth: 5,
+    borderColor: colors.wash,
   },
-  shutterInner: { flex: 1, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
-  shutterLabel: {
-    ...font.overline,
-    position: 'absolute',
-    bottom: spacing.md,
-    alignSelf: 'center',
-    color: colors.text,
-  },
-  roundWrap: { alignItems: 'center', gap: 6, marginBottom: spacing.xl },
-  round: {
+  shutterLabel: { ...type.button, fontSize: 14, color: colors.paper },
+  focused: { outlineColor: colors.citrate, outlineWidth: 2, outlineOffset: 3, outlineStyle: 'solid' },
+  side: { alignItems: 'center', gap: spacing.sm, width: 84, paddingTop: 14 },
+  sideCircle: {
     width: 52,
     height: 52,
     borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.overlay,
+    backgroundColor: colors.scrim,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(238, 242, 239, 0.3)',
   },
-  roundActive: { borderColor: colors.sun },
-  roundLabel: { ...font.caption, color: colors.textSecondary },
+  sideActive: { backgroundColor: colors.paper },
+  sideLabel: { ...type.small, color: colors.wash },
 });

@@ -1,3 +1,9 @@
+import { AtkinsonHyperlegible_400Regular } from '@expo-google-fonts/atkinson-hyperlegible/400Regular';
+import { AtkinsonHyperlegible_700Bold } from '@expo-google-fonts/atkinson-hyperlegible/700Bold';
+import { BodoniModa_500Medium } from '@expo-google-fonts/bodoni-moda/500Medium';
+import { BodoniModa_500Medium_Italic } from '@expo-google-fonts/bodoni-moda/500Medium_Italic';
+import { CourierPrime_400Regular } from '@expo-google-fonts/courier-prime/400Regular';
+import { CourierPrime_700Bold } from '@expo-google-fonts/courier-prime/700Bold';
 import { Feather } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
@@ -8,7 +14,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { PaywallModal } from '@/components/PaywallModal';
-import { colors } from '@/constants/theme';
+import { colors, fonts } from '@/constants/theme';
 import { CollectionProvider } from '@/context/CollectionContext';
 import { CreditsProvider } from '@/context/CreditsContext';
 
@@ -20,24 +26,32 @@ const navigationTheme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    primary: colors.leaf,
-    background: colors.background,
-    card: colors.surface,
-    text: colors.text,
-    border: colors.border,
-    notification: colors.bloom,
+    primary: colors.paper,
+    background: colors.prussian,
+    card: colors.prussian,
+    text: colors.paper,
+    border: colors.line,
+    notification: colors.ferric,
   },
 };
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts(Feather.font);
+  const [fontsLoaded, fontError] = useFonts({
+    ...Feather.font,
+    BodoniModa_500Medium,
+    BodoniModa_500Medium_Italic,
+    AtkinsonHyperlegible_400Regular,
+    AtkinsonHyperlegible_700Bold,
+    CourierPrime_400Regular,
+    CourierPrime_700Bold,
+  });
 
   useEffect(() => {
-    SystemUI.setBackgroundColorAsync(colors.background).catch(() => {});
+    SystemUI.setBackgroundColorAsync(colors.prussian).catch(() => {});
   }, []);
 
   useEffect(() => {
-    // Icon fonts failing to load shouldn't brick the app — fall through and render anyway.
+    // A font failing to load shouldn't brick the app — fall back to system faces.
     if (fontsLoaded || fontError) SplashScreen.hideAsync().catch(() => {});
   }, [fontsLoaded, fontError]);
 
@@ -51,18 +65,15 @@ export default function RootLayout() {
             <StatusBar style="light" />
             <Stack
               screenOptions={{
-                headerStyle: { backgroundColor: colors.background },
-                headerTintColor: colors.text,
-                headerTitleStyle: { fontWeight: '700' },
+                headerStyle: { backgroundColor: colors.prussian },
+                headerTintColor: colors.paper,
+                headerTitleStyle: { fontFamily: fonts.bodyBold },
                 headerShadowVisible: false,
-                contentStyle: { backgroundColor: colors.background },
+                contentStyle: { backgroundColor: colors.prussian },
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="result"
-                options={{ title: 'Analysis', presentation: 'card', headerBackTitle: 'Back' }}
-              />
+              <Stack.Screen name="result" options={{ title: '', headerBackTitle: 'Back' }} />
             </Stack>
             <PaywallModal />
           </CollectionProvider>

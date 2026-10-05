@@ -1,12 +1,12 @@
-import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { GradientButton } from '@/components/GradientButton';
-import { colors, font, radius, shadow, spacing } from '@/constants/theme';
+import { Button } from '@/components/Button';
+import { CyanotypePrint } from '@/components/Cyanotype';
+import { colors, radius, spacing, type } from '@/constants/theme';
 import { useCollection } from '@/context/CollectionContext';
 import type { CollectionItem } from '@/services/types';
-import { difficultyColor, formatDate } from '@/utils/format';
+import type { PressState } from '@/utils/pressable';
 
 export default function CollectionScreen() {
   const { items, isLoaded } = useCollection();
@@ -14,7 +14,7 @@ export default function CollectionScreen() {
   if (!isLoaded) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={colors.leaf} />
+        <ActivityIndicator color={colors.paper} />
       </View>
     );
   }
@@ -22,14 +22,11 @@ export default function CollectionScreen() {
   if (items.length === 0) {
     return (
       <View style={[styles.center, styles.empty]}>
-        <View style={styles.emptyIcon}>
-          <Feather name="book-open" size={32} color={colors.leaf} />
-        </View>
-        <Text style={styles.emptyTitle}>Your garden journal is empty</Text>
+        <Text style={styles.emptyTitle}>No plants saved yet</Text>
         <Text style={styles.emptyBody}>
-          Identify a plant and tap “Save to Collection” to keep its care guide here.
+          After identifying a plant, tap Save to collection. It’s kept here as a blue print with its care notes.
         </Text>
-        <GradientButton label="Scan a plant" icon="aperture" onPress={() => router.navigate('/')} style={styles.emptyCta} />
+        <Button label="Identify a plant" icon="aperture" onPress={() => router.navigate('/')} style={styles.emptyCta} />
       </View>
     );
   }
@@ -44,87 +41,61 @@ export default function CollectionScreen() {
       columnWrapperStyle={styles.column}
       ListHeaderComponent={
         <Text style={styles.count}>
-          {items.length} {items.length === 1 ? 'plant' : 'plants'} identified
+          {items.length} {items.length === 1 ? 'plate' : 'plates'}, numbered in the order you saved them
         </Text>
       }
-      renderItem={({ item }) => <PlantTile item={item} />}
+      // Items are stored newest first; plate 1 is the first plant ever saved.
+      renderItem={({ item, index }) => <Plate item={item} number={items.length - index} />}
     />
   );
 }
 
-function PlantTile({ item }: { item: CollectionItem }) {
+function Plate({ item, number }: { item: CollectionItem; number: number }) {
   const { result } = item;
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/result', params: { id: item.id } })}
       accessibilityRole="button"
-      accessibilityLabel={`${result.common_name}, saved ${formatDate(item.createdAt)}`}
-      style={({ pressed }) => [styles.tile, pressed && { transform: [{ scale: 0.97 }], opacity: 0.9 }]}
+      accessibilityLabel={`Plate ${number}: ${result.common_name}`}
+      style={({ pressed, focused }: PressState) => [styles.plate, pressed && { opacity: 0.85 }, focused && styles.focused]}
     >
-      <Image source={{ uri: item.imageUri }} style={styles.tileImage} resizeMode="cover" />
-      <View style={[styles.badge, { borderColor: difficultyColor[result.care.difficulty] }]}>
-        <Text style={[styles.badgeText, { color: difficultyColor[result.care.difficulty] }]}>
-          {result.care.difficulty}
-        </Text>
-      </View>
-      <View style={styles.tileBody}>
-        <Text style={styles.tileName} numberOfLines={1}>
+      <CyanotypePrint uri={item.imageUri} style={styles.print} />
+      <Text style={styles.plateNo}>Pl. {number}</Text>
+      <Text style={styles.latin} numberOfLines={2}>
+        {result.scientific_name || result.common_name}
+      </Text>
+      {!!result.scientific_name && (
+        <Text style={styles.common} numberOfLines={1}>
           {result.common_name}
         </Text>
-        <Text style={styles.tileSci} numberOfLines={1}>
-          {result.scientific_name || result.family}
-        </Text>
-        <Text style={styles.tileDate}>{formatDate(item.createdAt)}</Text>
-      </View>
+      )}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
-  empty: { paddingHorizontal: spacing.xxl },
-  emptyIcon: {
-    width: 76,
-    height: 76,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.leafSoft,
-    marginBottom: spacing.xl,
-  },
-  emptyTitle: { ...font.title, color: colors.text, textAlign: 'center' },
-  emptyBody: { ...font.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
-  emptyCta: { marginTop: spacing.xl, alignSelf: 'stretch' },
+  center: { flex: 1, justifyContent: 'center', backgroundColor: colors.prussian },
+  empty: { paddingHorizontal: spacing.xl },
+  emptyTitle: { ...type.title, color: colors.paper },
+  emptyBody: { ...type.body, color: colors.wash, marginTop: spacing.sm },
+  emptyCta: { marginTop: spacing.xl },
 
-  list: { backgroundColor: colors.background },
-  listContent: { padding: spacing.lg, gap: spacing.md },
+  list: { backgroundColor: colors.prussian },
+  listContent: { padding: spacing.lg, paddingTop: spacing.xs, gap: spacing.lg },
   column: { gap: spacing.md },
-  count: { ...font.overline, color: colors.textMuted, marginBottom: spacing.xs },
+  count: { ...type.small, color: colors.wash },
 
-  tile: {
+  plate: {
     flex: 1,
     maxWidth: '50%',
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-    ...shadow('#000', 6),
+    backgroundColor: colors.paper,
+    borderRadius: radius.sheet,
+    padding: spacing.sm,
+    paddingBottom: spacing.md,
   },
-  tileImage: { width: '100%', aspectRatio: 1, backgroundColor: colors.surfaceRaised },
-  badge: {
-    position: 'absolute',
-    top: spacing.sm,
-    left: spacing.sm,
-    paddingVertical: 3,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    backgroundColor: colors.overlay,
-  },
-  badgeText: { ...font.caption, fontSize: 11, fontWeight: '700' },
-  tileBody: { padding: spacing.md },
-  tileName: { ...font.heading, fontSize: 15, color: colors.text },
-  tileSci: { ...font.caption, fontStyle: 'italic', color: colors.textSecondary, marginTop: 2 },
-  tileDate: { ...font.caption, fontSize: 11, color: colors.textMuted, marginTop: spacing.sm },
+  focused: { outlineColor: colors.citrate, outlineWidth: 2, outlineOffset: 2, outlineStyle: 'solid' },
+  print: { width: '100%', aspectRatio: 4 / 5 },
+  plateNo: { ...type.monoCaps, fontSize: 10, color: colors.inkMuted, marginTop: spacing.sm },
+  latin: { ...type.latin, fontSize: 16, lineHeight: 20, color: colors.ink, marginTop: 2 },
+  common: { ...type.small, color: colors.inkMuted, marginTop: 2 },
 });

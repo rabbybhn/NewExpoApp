@@ -14,20 +14,20 @@ export interface PreparedImage {
  * re-encodes it as JPEG. Phone cameras produce 12MP+ images — sending them raw is slow
  * and costs far more tokens without improving identification.
  */
-export async function prepareImageForAnalysis(
-  uri: string,
-  width?: number,
-  height?: number,
-): Promise<PreparedImage> {
+export async function prepareImageForAnalysis(uri: string): Promise<PreparedImage> {
   const context = ImageManipulator.manipulate(uri);
+
+  // Measure the decoded image rather than trusting the picker/camera's reported size, which
+  // can be pre-rotation (EXIF) on some Android devices.
+  const original = await context.renderAsync();
   const max = config.maxImageDimension;
-  if (!width || !height) {
-    context.resize({ width: max, height: null });
-  } else if (Math.max(width, height) > max) {
-    context.resize(width >= height ? { width: max, height: null } : { width: null, height: max });
+  const scale = Math.min(1, max / Math.max(original.width, original.height));
+  if (scale < 1) {
+    // Pass both dimensions: the web implementation doesn't support `null` for "auto".
+    context.resize({ width: Math.round(original.width * scale), height: Math.round(original.height * scale) });
   }
 
-  const rendered = await context.renderAsync();
+  const rendered = scale < 1 ? await context.renderAsync() : original;
   const result = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.75, base64: true });
   if (!result.base64) throw new Error('Could not encode the image.');
   return { uri: result.uri, base64: result.base64 };

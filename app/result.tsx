@@ -1,60 +1,51 @@
-import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GradientButton } from '@/components/GradientButton';
-import { ScanningOverlay } from '@/components/ScanningOverlay';
-import { ResultSkeleton } from '@/components/Skeleton';
-import { colors, font, radius, spacing } from '@/constants/theme';
+import { Button } from '@/components/Button';
+import { DevelopingPhoto } from '@/components/Cyanotype';
+import { HerbariumLabel } from '@/components/HerbariumLabel';
+import { SheetSkeleton } from '@/components/Skeleton';
+import { colors, radius, spacing, type } from '@/constants/theme';
 import { useCollection } from '@/context/CollectionContext';
 import { useCredits } from '@/context/CreditsContext';
 import { prepareImageForAnalysis } from '@/services/image';
 import { identifyPlant, PlantIdError } from '@/services/openai';
 import type { PlantIdentification } from '@/services/types';
-import { confidenceColor, difficultyColor, formatDate, toxicityColor } from '@/utils/format';
-
-type IconName = ComponentProps<typeof Feather>['name'];
+import { toxicityColor } from '@/utils/format';
 
 type State =
   | { status: 'analyzing' }
-  | { status: 'done'; result: PlantIdentification; imageUri: string }
+  | { status: 'done'; result: PlantIdentification; imageUri: string; determinedAt: number }
   | { status: 'error'; message: string; retryable: boolean };
 
-const HERO_HEIGHT = 340;
-
 export default function ResultScreen() {
-  const params = useLocalSearchParams<{ uri?: string; width?: string; height?: string; id?: string }>();
+  const params = useLocalSearchParams<{ uri?: string; id?: string }>();
   const { getItem } = useCollection();
-  const savedItem = params.id ? getItem(params.id) : undefined;
 
   if (params.id) {
-    if (!savedItem) return <MissingItem />;
+    const item = getItem(params.id);
+    if (!item) return <Missing />;
     return (
-      <ResultLayout imageUri={savedItem.imageUri}>
-        <Stack.Screen options={{ title: savedItem.result.common_name }} />
-        <PlantCard result={savedItem.result} />
-        <Text style={styles.savedOn}>Saved {formatDate(savedItem.createdAt)}</Text>
-        <RemoveButton id={savedItem.id} />
-      </ResultLayout>
+      <Page
+        photo={<Image source={{ uri: item.imageUri }} style={styles.photo} resizeMode="cover" />}
+        sheet={<Determination result={item.result} determinedAt={item.createdAt} />}
+      >
+        <Details result={item.result} />
+        <RemoveButton id={item.id} />
+      </Page>
     );
   }
 
-  if (!params.uri) return <MissingItem />;
-  return (
-    <AnalyzeView
-      uri={params.uri}
-      width={Number(params.width) || undefined}
-      height={Number(params.height) || undefined}
-    />
-  );
+  if (!params.uri) return <Missing />;
+  return <AnalyzeView uri={params.uri} />;
 }
 
 // --- Fresh analysis -----------------------------------------------------------------------------
 
-function AnalyzeView({ uri, width, height }: { uri: string; width?: number; height?: number }) {
+function AnalyzeView({ uri }: { uri: string }) {
   const { credits, consumeCredit, showPaywall } = useCredits();
   const { addItem } = useCollection();
   const [state, setState] = useState<State>({ status: 'analyzing' });
@@ -68,7 +59,7 @@ function AnalyzeView({ uri, width, height }: { uri: string; width?: number; heig
 
     (async () => {
       try {
-        const prepared = await prepareImageForAnalysis(uri, width, height);
+        const prepared = await prepareImageForAnalysis(uri);
         if (controller.signal.aborted) return;
         const result = await identifyPlant(prepared.base64, { signal: controller.signal });
         if (controller.signal.aborted) return;
@@ -81,14 +72,16 @@ function AnalyzeView({ uri, width, height }: { uri: string; width?: number; heig
         if (Platform.OS !== 'web') {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         }
-        setState({ status: 'done', result, imageUri: prepared.uri });
+        // On web the prepared file is a short-lived blob: URL; keep a data URI so saved plates survive reloads.
+        const imageUri = Platform.OS === 'web' ? `data:image/jpeg;base64,${prepared.base64}` : prepared.uri;
+        setState({ status: 'done', result, imageUri, determinedAt: Date.now() });
       } catch (err) {
         if (controller.signal.aborted) return;
         if (err instanceof PlantIdError) {
           if (err.kind === 'cancelled') return;
           setState({ status: 'error', message: err.message, retryable: err.kind !== 'config' && err.kind !== 'auth' });
         } else {
-          setState({ status: 'error', message: 'We couldn’t read that image. Try another photo.', retryable: false });
+          setState({ status: 'error', message: 'This image couldn’t be read. Choose a different photo.', retryable: false });
         }
       }
     })();
@@ -96,7 +89,7 @@ function AnalyzeView({ uri, width, height }: { uri: string; width?: number; heig
     return () => controller.abort();
     // `attempt` re-runs the analysis on retry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uri, width, height, attempt]);
+  }, [uri, attempt]);
 
   const retry = () => {
     if ((credits ?? 0) <= 0) {
@@ -115,109 +108,94 @@ function AnalyzeView({ uri, width, height }: { uri: string; width?: number; heig
       setSavedId(item.id);
       if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     } catch {
-      Alert.alert('Couldn’t save', 'Something went wrong saving this plant. Please try again.');
+      Alert.alert('Not saved', 'The plant couldn’t be saved to your collection. Try again.');
     } finally {
       setSaving(false);
     }
   };
 
+  const identified = state.status === 'done' && state.result.is_plant;
+
+  let sheet: ReactNode;
+  if (state.status === 'analyzing') {
+    sheet = <SheetSkeleton />;
+  } else if (state.status === 'error') {
+    sheet = (
+      <Notice title="Not identified" body={`${state.message} No scan was used.`}>
+        {state.retryable && <Button label="Try again" icon="refresh-cw" variant="ink" onPress={retry} />}
+        <Button label="Take another photo" icon="camera" variant="inkOutline" onPress={() => router.back()} />
+      </Notice>
+    );
+  } else if (!state.result.is_plant) {
+    sheet = (
+      <Notice
+        title="No plant in this photo"
+        body="Move closer so one leaf or flower fills the frame, in daylight if you can. No scan was used."
+      >
+        <Button label="Take another photo" icon="camera" variant="ink" onPress={() => router.back()} />
+      </Notice>
+    );
+  } else {
+    sheet = <Determination result={state.result} determinedAt={state.determinedAt} />;
+  }
+
   return (
-    <ResultLayout imageUri={uri} scanning={state.status === 'analyzing'}>
-      {state.status === 'analyzing' && <ResultSkeleton />}
-
-      {state.status === 'error' && (
-        <Notice
-          icon="alert-triangle"
-          tint={colors.danger}
-          title="Analysis failed"
-          body={state.message}
-          footer="No scan credit was used."
-        >
-          {state.retryable && <GradientButton label="Try again" icon="refresh-cw" onPress={retry} />}
-          <GradientButton label="Take another photo" icon="camera" variant="ghost" onPress={() => router.back()} />
-        </Notice>
-      )}
-
-      {state.status === 'done' && !state.result.is_plant && (
-        <Notice
-          icon="search"
-          tint={colors.sun}
-          title="No plant detected"
-          body="We couldn’t find a plant in this photo. Get closer to a leaf or flower, use good light, and try again."
-          footer="No scan credit was used."
-        >
-          <GradientButton label="Take another photo" icon="camera" onPress={() => router.back()} />
-        </Notice>
-      )}
-
-      {state.status === 'done' && state.result.is_plant && (
+    <Page photo={<DevelopingPhoto uri={uri} developed={state.status !== 'analyzing'} style={styles.photo} />} sheet={sheet}>
+      {identified && (
         <>
-          <Stack.Screen options={{ title: state.result.common_name }} />
-          <PlantCard result={state.result} />
-          {savedId ? (
-            <GradientButton
-              label="Saved — view collection"
-              icon="check"
-              variant="forest"
-              onPress={() => router.navigate('/collection')}
-            />
-          ) : (
-            <GradientButton label="Save to Collection" icon="bookmark" loading={saving} onPress={save} />
-          )}
-          <GradientButton label="Scan another plant" icon="camera" variant="ghost" onPress={() => router.back()} />
+          <Details result={state.result} />
+          <View style={styles.actions}>
+            {savedId ? (
+              <Button label="Saved. Open collection" icon="check" onPress={() => router.navigate('/collection')} />
+            ) : (
+              <Button label="Save to collection" icon="bookmark" loading={saving} onPress={save} />
+            )}
+            <Button label="Identify another plant" icon="camera" variant="outline" onPress={() => router.back()} />
+          </View>
         </>
       )}
-    </ResultLayout>
+    </Page>
   );
 }
 
-// --- Layout pieces --------------------------------------------------------------------------------
+// --- Layout -------------------------------------------------------------------------------------
 
-function ResultLayout({ imageUri, scanning, children }: { imageUri: string; scanning?: boolean; children: ReactNode }) {
+/** A herbarium sheet: the photo mounted with tape, the determination typed beneath it. */
+function Page({ photo, sheet, children }: { photo: ReactNode; sheet: ReactNode; children?: ReactNode }) {
   const insets = useSafeAreaInsets();
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxl }]}
-    >
-      <View style={styles.hero}>
-        <Image source={{ uri: imageUri }} style={styles.heroImage} resizeMode="cover" accessibilityIgnoresInvertColors />
-        {scanning && <ScanningOverlay height={HERO_HEIGHT} />}
+    <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}>
+      <View style={styles.sheet}>
+        <View style={styles.mount}>
+          {photo}
+          <View style={[styles.tape, styles.tapeLeft]} />
+          <View style={[styles.tape, styles.tapeRight]} />
+        </View>
+        <View style={styles.sheetBody}>{sheet}</View>
       </View>
-      <View style={styles.body}>{children}</View>
+      {children}
     </ScrollView>
   );
 }
 
-function PlantCard({ result }: { result: PlantIdentification }) {
-  const lowConfidence = result.confidence < 50;
-  const difficulty = result.care.difficulty;
-
+function Determination({ result, determinedAt }: { result: PlantIdentification; determinedAt: number }) {
   return (
-    <View style={styles.card}>
-      <Text style={styles.overline}>
-        {result.plant_type} · {result.family}
+    <>
+      <Text style={styles.commonName} accessibilityRole="header">
+        {result.common_name}
       </Text>
-      <Text style={styles.name}>{result.common_name}</Text>
-      {!!result.scientific_name && <Text style={styles.scientific}>{result.scientific_name}</Text>}
-
-      <View style={styles.chips}>
-        <Chip icon="target" color={confidenceColor(result.confidence)} label={`${result.confidence}% match`} />
-        <Chip icon="feather" color={difficultyColor[difficulty]} label={`${difficulty} care`} />
-        <Chip icon="globe" color={colors.textSecondary} label={result.native_region} />
+      {!!result.scientific_name && <Text style={styles.latin}>{result.scientific_name}</Text>}
+      <View style={styles.labelWrap}>
+        <HerbariumLabel result={result} determinedAt={determinedAt} />
       </View>
+    </>
+  );
+}
 
-      <ConfidenceBar value={result.confidence} />
-
-      {lowConfidence && (
-        <View style={[styles.callout, { backgroundColor: colors.sunSoft }]}>
-          <Feather name="info" size={16} color={colors.sun} />
-          <Text style={styles.calloutText}>
-            Low-confidence match. Try a sharper photo of a single leaf or flower for a better result.
-          </Text>
-        </View>
-      )}
-
+function Details({ result }: { result: PlantIdentification }) {
+  const { care, toxicity } = result;
+  return (
+    <View style={styles.details}>
       {!!result.description && (
         <Section title="About">
           <Text style={styles.paragraph}>{result.description}</Text>
@@ -225,68 +203,36 @@ function PlantCard({ result }: { result: PlantIdentification }) {
       )}
 
       {result.key_features.length > 0 && (
-        <Section title="How we recognized it">
+        <Section title="Identified by">
           {result.key_features.map((feature) => (
-            <View key={feature} style={styles.bulletRow}>
-              <View style={styles.bullet} />
-              <Text style={styles.bulletText}>{feature}</Text>
-            </View>
+            <Text key={feature} style={styles.paragraph}>
+              — {feature}
+            </Text>
           ))}
         </Section>
       )}
 
-      <Section title="Care guide">
-        <View style={styles.careGrid}>
-          <CareTile icon="sun" color={colors.sun} label="Light" value={result.care.light} />
-          <CareTile icon="droplet" color={colors.water} label="Water" value={result.care.water} />
-          <CareTile icon="layers" color={colors.leaf} label="Soil" value={result.care.soil} />
-          <CareTile icon="thermometer" color={colors.bloom} label="Temperature" value={result.care.temperature} />
-        </View>
+      <Section title={`Care · ${care.difficulty}`}>
+        <Row label="Light" value={care.light} />
+        <Row label="Water" value={care.water} />
+        <Row label="Soil" value={care.soil} />
+        <Row label="Temperature" value={care.temperature} last />
       </Section>
 
       <Section title="Safety">
-        <View style={styles.toxRow}>
-          <ToxicityTile icon="heart" label="Cats & dogs" level={result.toxicity.pets} />
-          <ToxicityTile icon="user" label="People" level={result.toxicity.humans} />
-        </View>
-        {!!result.toxicity.notes && <Text style={[styles.paragraph, styles.gapSm]}>{result.toxicity.notes}</Text>}
+        <Row label="Cats and dogs" value={toxicity.pets} valueColor={toxicityColor[toxicity.pets]} />
+        <Row label="People" value={toxicity.humans} valueColor={toxicityColor[toxicity.humans]} last />
+        {!!toxicity.notes && <Text style={[styles.paragraph, styles.gap]}>{toxicity.notes}</Text>}
         <Text style={styles.disclaimer}>
-          AI identifications can be wrong. Never eat or use a plant medicinally based on this app.
+          Identifications can be wrong. Don’t eat or use a plant as medicine based on this app.
         </Text>
       </Section>
 
       {!!result.health_assessment && (
-        <Section title="Health check">
-          <View style={[styles.callout, { backgroundColor: colors.leafSoft, marginTop: 0 }]}>
-            <Feather name="activity" size={16} color={colors.leaf} />
-            <Text style={styles.calloutText}>{result.health_assessment}</Text>
-          </View>
+        <Section title="Health">
+          <Text style={styles.paragraph}>{result.health_assessment}</Text>
         </Section>
       )}
-    </View>
-  );
-}
-
-function Chip({ icon, label, color }: { icon: IconName; label: string; color: string }) {
-  return (
-    <View style={[styles.chip, { borderColor: `${color}55` }]}>
-      <Feather name={icon} size={13} color={color} />
-      <Text style={[styles.chipText, { color }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function ConfidenceBar({ value }: { value: number }) {
-  return (
-    <View
-      style={styles.barTrack}
-      accessibilityRole="progressbar"
-      accessibilityLabel="Identification confidence"
-      accessibilityValue={{ min: 0, max: 100, now: value }}
-    >
-      <View style={[styles.barFill, { width: `${value}%`, backgroundColor: confidenceColor(value) }]} />
     </View>
   );
 }
@@ -294,58 +240,30 @@ function ConfidenceBar({ value }: { value: number }) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        {title}
+      </Text>
       {children}
     </View>
   );
 }
 
-function CareTile({ icon, color, label, value }: { icon: IconName; color: string; label: string; value: string }) {
+function Row({ label, value, valueColor, last }: { label: string; value: string; valueColor?: string; last?: boolean }) {
   return (
-    <View style={styles.careTile}>
-      <View style={styles.careHeader}>
-        <Feather name={icon} size={15} color={color} />
-        <Text style={styles.careLabel}>{label}</Text>
-      </View>
-      <Text style={styles.careValue}>{value}</Text>
+    <View style={[styles.row, !last && styles.rowRule]}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={[styles.rowValue, valueColor ? { color: valueColor, fontFamily: type.bodyStrong.fontFamily } : null]}>
+        {value}
+      </Text>
     </View>
   );
 }
 
-function ToxicityTile({ icon, label, level }: { icon: IconName; label: string; level: PlantIdentification['toxicity']['pets'] }) {
-  const color = toxicityColor[level];
+function Notice({ title, body, children }: { title: string; body: string; children?: ReactNode }) {
   return (
-    <View style={[styles.toxTile, { borderColor: `${color}55` }]}>
-      <Feather name={icon} size={16} color={colors.textSecondary} />
-      <Text style={styles.careLabel}>{label}</Text>
-      <Text style={[styles.toxLevel, { color }]}>{level}</Text>
-    </View>
-  );
-}
-
-function Notice({
-  icon,
-  tint,
-  title,
-  body,
-  footer,
-  children,
-}: {
-  icon: IconName;
-  tint: string;
-  title: string;
-  body: string;
-  footer?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <View style={[styles.card, styles.notice]}>
-      <View style={[styles.noticeIcon, { backgroundColor: `${tint}26` }]}>
-        <Feather name={icon} size={26} color={tint} />
-      </View>
+    <View>
       <Text style={styles.noticeTitle}>{title}</Text>
-      <Text style={[styles.paragraph, styles.center]}>{body}</Text>
-      {!!footer && <Text style={styles.disclaimer}>{footer}</Text>}
+      <Text style={styles.noticeBody}>{body}</Text>
       <View style={styles.noticeActions}>{children}</View>
     </View>
   );
@@ -357,7 +275,7 @@ function RemoveButton({ id }: { id: string }) {
   const remove = useCallback(() => {
     // Leave the screen first so it never renders the "missing" state mid-transition.
     router.back();
-    removeItem(id).catch(() => Alert.alert('Couldn’t remove', 'Please try again.'));
+    removeItem(id).catch(() => Alert.alert('Not removed', 'The plant couldn’t be removed. Try again.'));
   }, [id, removeItem]);
 
   const confirm = () => {
@@ -365,122 +283,77 @@ function RemoveButton({ id }: { id: string }) {
       if (window.confirm('Remove this plant from your collection?')) remove();
       return;
     }
-    Alert.alert('Remove plant?', 'This removes it from your collection.', [
+    Alert.alert('Remove this plant?', 'Its photo and notes will be deleted from your collection.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: remove },
     ]);
   };
 
-  return <GradientButton label="Remove from collection" icon="trash-2" variant="ghost" onPress={confirm} />;
+  return (
+    <View style={styles.actions}>
+      <Button label="Remove from collection" icon="trash-2" variant="outline" onPress={confirm} />
+    </View>
+  );
 }
 
-function MissingItem() {
+function Missing() {
   return (
     <View style={[styles.screen, styles.missing]}>
-      <Notice icon="help-circle" tint={colors.textSecondary} title="Nothing to show" body="This plant isn’t available anymore.">
-        <GradientButton label="Go back" icon="arrow-left" variant="ghost" onPress={() => router.back()} />
-      </Notice>
+      <View style={[styles.sheet, styles.sheetBody]}>
+        <Notice title="Plant not found" body="This plant was removed from your collection.">
+          <Button label="Go back" icon="arrow-left" variant="ink" onPress={() => router.back()} />
+        </Notice>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1 },
-  hero: { height: HERO_HEIGHT, backgroundColor: colors.surface, overflow: 'hidden' },
-  heroImage: { width: '100%', height: '100%' },
-  body: { padding: spacing.lg, marginTop: -spacing.xxl, gap: spacing.md },
+  screen: { flex: 1, backgroundColor: colors.prussian },
 
-  card: {
-    padding: spacing.xl,
-    borderRadius: radius.xl,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+  sheet: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    padding: spacing.lg,
+    paddingTop: spacing.xl,
+    backgroundColor: colors.paper,
+    borderRadius: radius.sheet,
   },
-  overline: { ...font.overline, color: colors.leaf },
-  name: { ...font.display, color: colors.text, marginTop: spacing.xs },
-  scientific: { ...font.body, fontStyle: 'italic', color: colors.textSecondary, marginTop: 2 },
-
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    backgroundColor: colors.surfaceRaised,
-    maxWidth: '100%',
+  mount: { alignSelf: 'center', width: '88%' },
+  photo: { width: '100%', aspectRatio: 4 / 5, backgroundColor: colors.paperShade },
+  tape: {
+    position: 'absolute',
+    top: -10,
+    width: 70,
+    height: 22,
+    backgroundColor: 'rgba(220, 227, 224, 0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 39, 66, 0.12)',
   },
-  chipText: { ...font.label, flexShrink: 1 },
+  tapeLeft: { left: -22, transform: [{ rotate: '-32deg' }] },
+  tapeRight: { right: -22, transform: [{ rotate: '32deg' }] },
+  sheetBody: { paddingTop: spacing.xl },
 
-  barTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.surfaceMuted,
-    marginTop: spacing.lg,
-    overflow: 'hidden',
-  },
-  barFill: { height: '100%', borderRadius: 3 },
+  commonName: { ...type.plantName, color: colors.ink },
+  latin: { ...type.latin, color: colors.inkMuted, marginTop: 2 },
+  labelWrap: { marginTop: spacing.xl, alignSelf: 'stretch' },
 
-  callout: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    alignItems: 'flex-start',
-    padding: spacing.md,
-    borderRadius: radius.md,
-    marginTop: spacing.lg,
-  },
-  calloutText: { ...font.label, fontWeight: '500', lineHeight: 19, color: colors.text, flex: 1 },
-
+  details: { paddingHorizontal: spacing.lg + spacing.xs, paddingTop: spacing.sm },
   section: { marginTop: spacing.xl },
-  sectionTitle: { ...font.overline, color: colors.textMuted, marginBottom: spacing.sm },
-  paragraph: { ...font.body, color: colors.textSecondary },
+  sectionTitle: { ...type.monoCaps, color: colors.wash, marginBottom: spacing.sm },
+  paragraph: { ...type.body, color: colors.paper },
+  gap: { marginTop: spacing.md },
+  disclaimer: { ...type.small, color: colors.wash, marginTop: spacing.md },
 
-  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginTop: 6 },
-  bullet: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.leaf, marginTop: 8 },
-  bulletText: { ...font.body, color: colors.textSecondary, flex: 1 },
+  row: { paddingVertical: spacing.md },
+  rowRule: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  rowLabel: { ...type.small, color: colors.wash },
+  rowValue: { ...type.body, color: colors.paper, marginTop: 2 },
 
-  careGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  careTile: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceRaised,
-  },
-  careHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  careLabel: { ...font.caption, color: colors.textMuted },
-  careValue: { ...font.label, fontWeight: '500', lineHeight: 18, color: colors.text, marginTop: 6 },
+  actions: { paddingHorizontal: spacing.lg, marginTop: spacing.xxl, gap: spacing.sm },
 
-  toxRow: { flexDirection: 'row', gap: spacing.sm },
-  toxTile: {
-    flex: 1,
-    gap: 4,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    backgroundColor: colors.surfaceRaised,
-  },
-  toxLevel: { ...font.heading, fontSize: 15 },
-  disclaimer: { ...font.caption, color: colors.textMuted, marginTop: spacing.md, textAlign: 'center' },
-  gapSm: { marginTop: spacing.sm },
-
-  savedOn: { ...font.caption, color: colors.textMuted, textAlign: 'center' },
-
-  notice: { alignItems: 'center' },
-  noticeIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  noticeTitle: { ...font.title, color: colors.text, marginBottom: spacing.sm },
-  noticeActions: { alignSelf: 'stretch', gap: spacing.sm, marginTop: spacing.xl },
-  center: { textAlign: 'center' },
-  missing: { justifyContent: 'center', padding: spacing.lg },
+  noticeTitle: { ...type.title, color: colors.ink },
+  noticeBody: { ...type.body, color: colors.inkMuted, marginTop: spacing.sm },
+  noticeActions: { gap: spacing.sm, marginTop: spacing.xl },
+  missing: { justifyContent: 'center' },
 });

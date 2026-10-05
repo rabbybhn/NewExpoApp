@@ -1,44 +1,64 @@
-import { Platform, type ViewStyle } from 'react-native';
+import type { TextStyle } from 'react-native';
 
 /**
- * "Greenhouse at night" palette — deep forest-charcoal surfaces with leaf-green and bloom accents.
+ * "Cyanotype herbarium" — after Anna Atkins' 1843 cyanotype plates of botanical specimens:
+ * Prussian-blue ground, cool herbarium paper, typed determination labels.
  */
 export const colors = {
-  background: '#0B100D',
-  surface: '#131A15',
-  surfaceRaised: '#1A231D',
-  surfaceMuted: '#233027',
-  border: '#25322A',
-  borderStrong: '#34453A',
+  /** Prussian blue — the app's ground. */
+  prussian: '#0F2742',
+  prussianRaised: '#163556',
+  /** Cyanotype print blue — the wash laid over photos. */
+  print: '#1F4F8F',
+  /** Herbarium paper — cool white sheets and primary actions. */
+  paper: '#EEF2EF',
+  paperShade: '#DCE3E0',
+  /** Pale wash — secondary text on blue. */
+  wash: '#9DB8D6',
+  washDim: '#6F8DB0',
+  /** Ink on paper. */
+  ink: '#0F2742',
+  inkMuted: '#4A6280',
+  /** Ferricyanide red — warnings and toxicity only. */
+  ferric: '#E2643F',
+  /** Ammonium citrate yellow-green — "safe" states only. */
+  citrate: '#D4E28A',
 
-  text: '#F1F7F2',
-  textSecondary: '#AFC0B4',
-  textMuted: '#738578',
-
-  leaf: '#4ADE80',
-  leafDeep: '#15803D',
-  leafSoft: 'rgba(74, 222, 128, 0.15)',
-  teal: '#2DD4BF',
-  bloom: '#F472B6',
-  bloomSoft: 'rgba(244, 114, 182, 0.15)',
-  sun: '#FBBF24',
-  sunSoft: 'rgba(251, 191, 36, 0.15)',
-  water: '#60A5FA',
-  waterSoft: 'rgba(96, 165, 250, 0.15)',
-  danger: '#F87171',
-  dangerSoft: 'rgba(248, 113, 113, 0.15)',
-
-  overlay: 'rgba(6, 10, 8, 0.72)',
-  white: '#FFFFFF',
+  line: 'rgba(238, 242, 239, 0.14)',
+  inkLine: 'rgba(15, 39, 66, 0.18)',
+  tape: 'rgba(238, 242, 239, 0.72)',
+  scrim: 'rgba(15, 39, 66, 0.78)',
 } as const;
 
-export const gradients = {
-  leaf: [colors.leaf, colors.teal] as const,
-  forest: ['#22C55E', colors.leafDeep] as const,
-  bloom: [colors.bloom, '#C026D3'] as const,
-  fadeBottom: ['transparent', 'rgba(11, 16, 13, 0.92)'] as const,
-  fadeTop: ['rgba(11, 16, 13, 0.75)', 'transparent'] as const,
-};
+/** Ferric reads poorly as text on paper; this darker variant passes contrast there. */
+export const ferricOnPaper = '#B8431F';
+/** Citrate is invisible on paper; use this deeper green for "safe" text on paper. */
+export const citrateOnPaper = '#4F6B12';
+
+export const fonts = {
+  display: 'BodoniModa_500Medium',
+  displayItalic: 'BodoniModa_500Medium_Italic',
+  body: 'AtkinsonHyperlegible_400Regular',
+  bodyBold: 'AtkinsonHyperlegible_700Bold',
+  mono: 'CourierPrime_400Regular',
+  monoBold: 'CourierPrime_700Bold',
+} as const;
+
+/**
+ * Type scale. Custom faces carry their own weight, so never combine these with `fontWeight`.
+ * Bodoni is reserved for plant names and screen titles.
+ */
+export const type = {
+  plantName: { fontFamily: fonts.display, fontSize: 36, lineHeight: 40, letterSpacing: -0.4 },
+  latin: { fontFamily: fonts.displayItalic, fontSize: 19, lineHeight: 24 },
+  title: { fontFamily: fonts.display, fontSize: 28, lineHeight: 33, letterSpacing: -0.2 },
+  body: { fontFamily: fonts.body, fontSize: 16, lineHeight: 24 },
+  bodyStrong: { fontFamily: fonts.bodyBold, fontSize: 16, lineHeight: 24 },
+  small: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18 },
+  button: { fontFamily: fonts.bodyBold, fontSize: 16, letterSpacing: 0.2 },
+  mono: { fontFamily: fonts.mono, fontSize: 14, lineHeight: 20 },
+  monoCaps: { fontFamily: fonts.monoBold, fontSize: 11, letterSpacing: 1.6, textTransform: 'uppercase' },
+} satisfies Record<string, TextStyle>;
 
 export const spacing = {
   xs: 4,
@@ -49,33 +69,9 @@ export const spacing = {
   xxl: 32,
 } as const;
 
+/** Paper is cut, not moulded: corners stay tight. */
 export const radius = {
-  sm: 8,
-  md: 12,
-  lg: 18,
-  xl: 24,
-  pill: 999,
+  sheet: 3,
+  control: 6,
+  round: 999,
 } as const;
-
-export const font = {
-  display: { fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
-  title: { fontSize: 22, fontWeight: '700', letterSpacing: -0.3 },
-  heading: { fontSize: 17, fontWeight: '700' },
-  body: { fontSize: 15, fontWeight: '400', lineHeight: 22 },
-  label: { fontSize: 13, fontWeight: '600' },
-  caption: { fontSize: 12, fontWeight: '500' },
-  overline: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
-} as const;
-
-export function shadow(color: string = '#000', elevation = 8): ViewStyle {
-  return Platform.select<ViewStyle>({
-    ios: {
-      shadowColor: color,
-      shadowOpacity: 0.35,
-      shadowRadius: elevation * 1.5,
-      shadowOffset: { width: 0, height: elevation / 2 },
-    },
-    android: { elevation },
-    default: { boxShadow: `0px ${elevation / 2}px ${elevation * 1.5}px ${color}59` },
-  }) as ViewStyle;
-}

@@ -1,22 +1,21 @@
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useRef, useState, type ComponentProps } from 'react';
-import { Animated, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GradientButton } from '@/components/GradientButton';
+import { Button } from '@/components/Button';
 import { credits as creditConfig } from '@/constants/config';
-import { colors, font, gradients, radius, shadow, spacing } from '@/constants/theme';
-import { useAnimatedValue } from '@/hooks/useAnimatedValue';
+import { colors, radius, spacing, type } from '@/constants/theme';
 import { useCredits } from '@/context/CreditsContext';
 
-type Phase = 'offer' | 'processing' | 'success';
+type Phase = 'offer' | 'buying' | 'done';
 
-const PERKS: { icon: ComponentProps<typeof Feather>['name']; title: string; body: string }[] = [
-  { icon: 'aperture', title: `${creditConfig.packSize} AI identifications`, body: 'Houseplants, flowers, trees & weeds' },
-  { icon: 'droplet', title: 'Personal care guides', body: 'Light, water, soil & temperature' },
-  { icon: 'shield', title: 'Pet & kid safety checks', body: 'Toxicity info for every plant' },
+const INCLUDED = [
+  'Name and botanical family',
+  'Light, water, soil and temperature care',
+  'Toxicity for pets and people',
+  'A health check from the photo',
 ];
 
 /** Simulated purchase delay so the flow feels like a real store sheet. */
@@ -25,14 +24,13 @@ const MOCK_PURCHASE_MS = 1600;
 /**
  * Global paywall, driven by `useCredits().isPaywallVisible`. Mounted once in the root layout.
  *
- * This is a simulation: no payment is taken. Swap `purchase()` for a real IAP library
+ * This is a simulation: no payment is taken. Swap `buy()` for a real IAP library
  * (e.g. RevenueCat or expo-iap) before shipping.
  */
 export function PaywallModal() {
   const { isPaywallVisible, hidePaywall, addCredits, credits } = useCredits();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>('offer');
-  const pop = useAnimatedValue(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -42,24 +40,23 @@ export function PaywallModal() {
     [],
   );
 
-
-  const purchase = () => {
-    setPhase('processing');
+  const buy = () => {
+    setPhase('buying');
     timer.current = setTimeout(async () => {
       await addCredits(creditConfig.packSize);
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
-      setPhase('success');
-      pop.setValue(0);
-      Animated.spring(pop, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }).start();
+      setPhase('done');
     }, MOCK_PURCHASE_MS);
   };
 
   const close = () => {
-    if (phase === 'processing') return;
+    if (phase === 'buying') return;
     hidePaywall();
   };
+
+  const perScan = Math.round((creditConfig.packPriceUsd / creditConfig.packSize) * 100);
 
   return (
     <Modal
@@ -71,80 +68,52 @@ export function PaywallModal() {
       statusBarTranslucent
     >
       <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Dismiss" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.md }]}>
-          <View style={styles.handle} />
-
-          {phase === 'success' ? (
-            <View style={styles.successBody}>
-              <Animated.View
-                style={[
-                  styles.successBadge,
-                  { transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }] },
-                ]}
-              >
-                <LinearGradient colors={gradients.forest} style={styles.successGradient}>
-                  <Feather name="check" size={40} color={colors.white} />
-                </LinearGradient>
-              </Animated.View>
-              <Text style={styles.title}>You’re all set to grow!</Text>
-              <Text style={styles.subtitle}>
-                {creditConfig.packSize} scans added. You now have{' '}
-                <Text style={styles.highlight}>{credits ?? 0} scans</Text> ready to go.
+          {phase === 'done' ? (
+            <View style={styles.doneBody}>
+              <Text style={styles.eyebrow}>{creditConfig.packName}</Text>
+              <Text style={styles.title}>{creditConfig.packSize} scans added</Text>
+              <Text style={styles.body}>
+                You have {credits ?? 0} scans left. A scan is used only when a plant is identified.
               </Text>
-              <GradientButton label="Start scanning" icon="aperture" onPress={hidePaywall} style={styles.cta} />
+              <Button label="Identify a plant" icon="aperture" variant="ink" onPress={hidePaywall} style={styles.doneCta} />
             </View>
           ) : (
             <>
-              <Pressable onPress={close} style={styles.close} hitSlop={12} accessibilityLabel="Close">
-                <Feather name="x" size={20} color={colors.textSecondary} />
-              </Pressable>
+              <View style={styles.header}>
+                <Text style={styles.eyebrow}>{creditConfig.packName}</Text>
+                <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+                  <Feather name="x" size={22} color={colors.inkMuted} />
+                </Pressable>
+              </View>
 
-              <LinearGradient colors={gradients.leaf} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-                <Feather name="feather" size={34} color={colors.background} />
-              </LinearGradient>
-
-              <Text style={styles.overline}>{creditConfig.packName}</Text>
               <Text style={styles.title}>
-                Unlock {creditConfig.packSize} Plant Scans for {creditConfig.packPrice}
+                {credits === 0 ? 'You’ve used your free scans' : `${creditConfig.packSize} more scans`}
               </Text>
-              <Text style={styles.subtitle}>
-                {credits === 0 ? 'You’ve used all your free scans. ' : ''}Identify every leaf, bloom and
-                mystery weed you find.
+              <Text style={styles.body}>
+                {creditConfig.packSize} scans for {creditConfig.packPrice}, about {perScan}¢ per plant. Scans don’t
+                expire.
               </Text>
 
-              <View style={styles.perks}>
-                {PERKS.map((perk) => (
-                  <View key={perk.title} style={styles.perk}>
-                    <View style={styles.perkIcon}>
-                      <Feather name={perk.icon} size={18} color={colors.leaf} />
-                    </View>
-                    <View style={styles.flex}>
-                      <Text style={styles.perkTitle}>{perk.title}</Text>
-                      <Text style={styles.perkBody}>{perk.body}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.priceCard}>
-                <View>
-                  <Text style={styles.priceLabel}>{creditConfig.packSize} scans</Text>
-                  <Text style={styles.perScan}>
-                    ≈ ${(creditConfig.packPriceUsd / creditConfig.packSize).toFixed(2)} per identification
-                  </Text>
+              <View style={styles.rule} />
+              <Text style={styles.listHeading}>Every scan includes</Text>
+              {INCLUDED.map((item) => (
+                <View key={item} style={styles.listRow}>
+                  <Feather name="check" size={16} color={colors.ink} />
+                  <Text style={styles.listText}>{item}</Text>
                 </View>
-                <Text style={styles.price}>{creditConfig.packPrice}</Text>
-              </View>
+              ))}
+              <View style={styles.rule} />
 
-              <GradientButton
-                label={phase === 'processing' ? 'Processing…' : `Buy for ${creditConfig.packPrice}`}
-                icon="lock"
-                loading={phase === 'processing'}
-                onPress={purchase}
+              <Button
+                label={phase === 'buying' ? 'Buying…' : `Buy ${creditConfig.packSize} scans for ${creditConfig.packPrice}`}
+                variant="ink"
+                loading={phase === 'buying'}
+                onPress={buy}
                 style={styles.cta}
               />
-              <Text style={styles.disclaimer}>Demo checkout — no real payment is taken.</Text>
+              <Text style={styles.footnote}>Demo checkout. No payment is taken.</Text>
             </>
           )}
         </View>
@@ -154,80 +123,24 @@ export function PaywallModal() {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
   sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl + 4,
-    borderTopRightRadius: radius.xl + 4,
+    backgroundColor: colors.paper,
+    borderTopLeftRadius: radius.sheet,
+    borderTopRightRadius: radius.sheet,
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow(colors.leaf, 16),
+    paddingTop: spacing.xl,
   },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.borderStrong,
-    marginBottom: spacing.lg,
-  },
-  close: {
-    position: 'absolute',
-    right: spacing.lg,
-    top: spacing.lg,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceRaised,
-    zIndex: 1,
-  },
-  hero: {
-    width: 68,
-    height: 68,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: spacing.lg,
-  },
-  overline: { ...font.overline, color: colors.leaf, textAlign: 'center' },
-  title: { ...font.title, color: colors.text, textAlign: 'center', marginTop: spacing.xs },
-  subtitle: { ...font.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
-  highlight: { color: colors.leaf, fontWeight: '700' },
-  perks: { marginTop: spacing.xl, gap: spacing.md },
-  perk: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  perkIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.leafSoft,
-  },
-  perkTitle: { ...font.label, fontSize: 15, color: colors.text },
-  perkBody: { ...font.caption, color: colors.textMuted, marginTop: 2 },
-  flex: { flex: 1 },
-  priceCard: {
-    marginTop: spacing.xl,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: colors.leaf,
-    backgroundColor: colors.leafSoft,
-  },
-  priceLabel: { ...font.heading, color: colors.text },
-  perScan: { ...font.caption, color: colors.textSecondary, marginTop: 2 },
-  price: { ...font.title, color: colors.text },
-  cta: { marginTop: spacing.lg, alignSelf: 'stretch' },
-  disclaimer: { ...font.caption, color: colors.textMuted, textAlign: 'center', marginTop: spacing.md },
-  successBody: { alignItems: 'center', paddingVertical: spacing.lg },
-  successBadge: { marginBottom: spacing.lg, borderRadius: 48, ...shadow(colors.leaf, 14) },
-  successGradient: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  eyebrow: { ...type.monoCaps, color: colors.inkMuted },
+  title: { ...type.title, color: colors.ink, marginTop: spacing.sm },
+  body: { ...type.body, color: colors.inkMuted, marginTop: spacing.sm },
+  rule: { height: 1, backgroundColor: colors.inkLine, marginVertical: spacing.lg },
+  listHeading: { ...type.bodyStrong, color: colors.ink, marginBottom: spacing.xs },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 6 },
+  listText: { ...type.body, color: colors.ink, flex: 1 },
+  cta: { alignSelf: 'stretch' },
+  footnote: { ...type.small, color: colors.inkMuted, textAlign: 'center', marginTop: spacing.md },
+  doneBody: { paddingBottom: spacing.sm },
+  doneCta: { alignSelf: 'stretch', marginTop: spacing.xl },
 });
