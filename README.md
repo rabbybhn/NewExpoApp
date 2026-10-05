@@ -84,6 +84,24 @@ constants/             Theme tokens and runtime config
   (`expo-file-system`) so they survive cache eviction. On web they're stored as data URIs
   in localStorage, which holds roughly 30 plants.
 
+## Build an APK on GitHub
+
+`.github/workflows/android-apk.yml` builds an installable release APK on every push to `main`
+(and on demand from **Actions → Android APK → Run workflow**). No Expo account is needed.
+
+1. Add your key under **Settings → Secrets and variables → Actions → New repository secret**,
+   named `OPENAI_API_KEY`. Alternatively, set a `PLANTID_API_URL` *variable* that points at
+   your backend proxy. Without either, the APK builds but identifications fail.
+2. Open the finished run and download **plantid-apk-N** from *Artifacts*. It's a zip that
+   contains the `.apk`.
+3. Copy the APK to an Android phone and open it. You may need to allow installs from
+   unknown sources.
+
+The APK is signed with the default debug keystore. That's fine for sideloading, but it
+isn't accepted by Google Play: use EAS Build or your own keystore for store releases. The
+key is inlined into the APK, so share builds made with a raw OpenAI key only with people
+you trust.
+
 ## Before shipping to the stores
 
 1. **Move the OpenAI key server-side.** Anything prefixed with `EXPO_PUBLIC_` is readable in
